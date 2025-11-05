@@ -20,17 +20,32 @@ export async function generateTitleFromUserMessage({
 }: {
   message: UIMessage;
 }) {
-  const { text: title } = await generateText({
-    model: myProvider.languageModel("title-model"),
-    system: `\n
-    - you will generate a short title based on the first message a user begins a conversation with
-    - ensure it is not more than 80 characters long
-    - the title should be a summary of the user's message
-    - do not use quotes or colons`,
-    prompt: JSON.stringify(message),
-  });
+  try {
+    const { text: title } = await generateText({
+      model: myProvider.languageModel("title-model"),
+      system: `\n
+      - you will generate a short title based on the first message a user begins a conversation with
+      - ensure it is not more than 80 characters long
+      - the title should be a summary of the user's message
+      - do not use quotes or colons`,
+      prompt: JSON.stringify(message),
+    });
 
-  return title;
+    return title;
+  } catch (error) {
+    // FALLBACK: If AI SDK fails, generate simple title from message
+    console.warn("Title generation failed, using fallback:", error);
+    
+    const content = typeof message.content === 'string' 
+      ? message.content 
+      : message.parts?.[0]?.text || "New Chat";
+    
+    // Create simple title from first 50 chars
+    const fallbackTitle = content.substring(0, 50).trim() + 
+      (content.length > 50 ? "..." : "");
+    
+    return fallbackTitle || "Financial Analysis";
+  }
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
