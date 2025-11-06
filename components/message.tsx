@@ -322,13 +322,54 @@ export const ThinkingMessage = () => {
     >
       <div className="flex items-start justify-start gap-3">
         <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-          <SparklesIcon size={14} />
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{
+              duration: 1.5,
+              repeat: Infinity,
+              ease: "linear",
+            }}
+          >
+            <SparklesIcon size={14} />
+          </motion.div>
         </div>
 
-        <div className="flex w-full flex-col gap-2 md:gap-4">
-          <div className="p-0 text-muted-foreground text-sm">
-            <LoadingText>Thinking...</LoadingText>
-          </div>
+        <div className="flex items-center gap-2">
+          <motion.div
+            animate={{
+              scale: [1, 1.2, 1],
+              opacity: [0.5, 1, 0.5],
+            }}
+            className="h-2 w-2 rounded-full bg-primary"
+            transition={{
+              duration: 1,
+              repeat: Infinity,
+            }}
+          />
+          <motion.div
+            animate={{
+              scale: [1, 1.2, 1],
+              opacity: [0.5, 1, 0.5],
+            }}
+            className="h-2 w-2 rounded-full bg-primary"
+            transition={{
+              duration: 1,
+              repeat: Infinity,
+              delay: 0.2,
+            }}
+          />
+          <motion.div
+            animate={{
+              scale: [1, 1.2, 1],
+              opacity: [0.5, 1, 0.5],
+            }}
+            className="h-2 w-2 rounded-full bg-primary"
+            transition={{
+              duration: 1,
+              repeat: Infinity,
+              delay: 0.4,
+            }}
+          />
         </div>
       </div>
     </motion.div>

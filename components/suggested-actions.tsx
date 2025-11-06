@@ -11,15 +11,21 @@ type SuggestedActionsProps = {
   chatId: string;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   selectedVisibilityType: VisibilityType;
+  messages: ChatMessage[]; 
 };
 
-function PureSuggestedActions({ chatId, sendMessage }: SuggestedActionsProps) {
+function PureSuggestedActions({ chatId, sendMessage, messages }: SuggestedActionsProps) {
   const suggestedActions = [
-  "How should I start investing with a small budget?",
-  "What are the safest assets during economic downturns?",
-  "How do I build a diversified investment portfolio?",
-  "What's the difference between ETFs and mutual funds?",
+    "How should I start investing with a small budget?",
+    "What are the safest assets during economic downturns?",
+    "How do I build a diversified investment portfolio?",
+    "What's the difference between ETFs and mutual funds?",
   ];
+
+  // ✅ Hide if there are any messages
+  if (messages.length > 0) {
+    return null;
+  }
 
   return (
     <div
@@ -60,6 +66,10 @@ export const SuggestedActions = memo(
       return false;
     }
     if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
+      return false;
+    }
+    // ✅ Re-render if messages length changes
+    if (prevProps.messages.length !== nextProps.messages.length) {
       return false;
     }
 

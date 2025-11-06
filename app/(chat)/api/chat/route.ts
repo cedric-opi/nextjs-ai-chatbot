@@ -110,133 +110,132 @@ async function handleChatRequest(requestBody: PostRequestBody) {
 
     const userMessageText = message.parts?.[0]?.text || ""
 
-    // ✅ Improved ticker extraction - only match valid stock tickers
+    // ✅ Simple ticker extraction (just for hints, not requirements)
     const extractTickerFromMessage = (text: string): string | null => {
-      // Match common patterns like "AAPL", "analyze TSLA", "what about MSFT"
-      // But exclude single letters like "I", "A" unless they're clearly tickers
-      const patterns = [
-        /\b([A-Z]{2,5})\b/g, // 2-5 uppercase letters (avoids single letters like "I")
-        /(?:ticker|stock|analyze|analysis|about|for)\s+([A-Z]{1,5})\b/gi, // Ticker after keywords
-      ];
-
-      for (const pattern of patterns) {
-        const matches = text.match(pattern);
-        if (matches) {
-          // Filter out common words
-          const commonWords = ['I', 'A', 'IT', 'US', 'TO', 'IN', 'ON', 'AT', 'BY', 'OR', 'AN', 'AS', 'BE', 'DO', 'GO', 'HE', 'IF', 'IS', 'ME', 'MY', 'NO', 'OF', 'OK', 'SO', 'UP', 'WE'];
-          const ticker = matches[matches.length - 1].toUpperCase();
-          if (!commonWords.includes(ticker)) {
-            return ticker;
-          }
+      const tickerPattern = /\b([A-Z]{2,5})\b/g;
+      const matches = Array.from(text.matchAll(tickerPattern));
+      
+      const commonWords = ['I', 'A', 'AI', 'IT', 'US', 'VS', 'OR', 'AND', 'THE', 'FOR', 'BUT', 'NOT', 'CAN', 'HAS', 'WAS'];
+      
+      for (const match of matches) {
+        const word = match[1];
+        if (!commonWords.includes(word)) {
+          return word;
         }
       }
       return null;
     };
 
-    // ✅ Check if there's a ticker in the current message OR conversation history
+    // ✅ Try to extract ticker (optional, just for context)
     let ticker = extractTickerFromMessage(userMessageText);
     let conversationContext = "";
 
-    // If no ticker found in current message, check previous messages for context
-    if (!ticker && messages.length > 1) {
-      console.log("🔍 No ticker in current message, checking conversation history...");
+    // Build conversation context from history
+    if (messages.length > 1) {
+      conversationContext = messages
+        .slice(Math.max(0, messages.length - 6))
+        .filter(m => m.role === "user") // Only user messages for context
+        .map(m => m.content || m.parts?.[0]?.text || "")
+        .join("\n");
       
-      // Look back through the last 5 messages to find a ticker
-      for (let i = messages.length - 2; i >= Math.max(0, messages.length - 6); i--) {
-        const prevMessage = messages[i];
-        const prevText = prevMessage.content || prevMessage.parts?.[0]?.text || "";
-        const prevTicker = extractTickerFromMessage(prevText);
-        
-        if (prevTicker) {
-          ticker = prevTicker;
-          console.log(`✅ Found ticker "${ticker}" from previous message`);
-          break;
+      // If no ticker in current message, try to find from history
+      if (!ticker) {
+        for (let i = messages.length - 2; i >= Math.max(0, messages.length - 6); i--) {
+          const prevMessage = messages[i];
+          if (prevMessage.role === "user") {
+            const prevText = prevMessage.content || prevMessage.parts?.[0]?.text || "";
+            const prevTicker = extractTickerFromMessage(prevText);
+            if (prevTicker) {
+              ticker = prevTicker;
+              console.log(`✅ Found context ticker "${ticker}" from history`);
+              break;
+            }
+          }
         }
       }
-
-      // Build conversation context for the AI
-      conversationContext = messages
-        .slice(Math.max(0, messages.length - 6)) // Last 5 messages + current
-        .map(m => `${m.role}: ${m.content || m.parts?.[0]?.text || ""}`)
-        .join("\n");
     }
 
-    // ✅ If still no ticker, check if it's a general financial question
-    const isGeneralFinancialQuestion = /\b(invest|stock|market|portfolio|trading|finance|dividend|earnings|P\/E|ratio|forecast|analysis|bull|bear|recession|economy)\b/i.test(userMessageText);
+    console.log("💬 Processing message:", userMessageText);
+    console.log("💡 Hint ticker:", ticker || "none");
+    console.log("📝 Conversation context:", conversationContext ? "Yes" : "No");
 
-    if (!ticker && !isGeneralFinancialQuestion) {
-      console.log("❌ No ticker found and not a financial question");
-      
-      const assistantMessageId = generateUUID();
-      const fallbackResponse = "I'm a financial assistant specialized in stock analysis. Please specify a stock ticker (e.g., 'Analyze AAPL') or ask a question about a specific company.";
-
-      await saveMessages({
-        messages: [
-          {
-            id: assistantMessageId,
-            role: "assistant",
-            parts: [{ text: fallbackResponse, type: "text" }],
-            createdAt: new Date(),
-            attachments: [],
-            chatId: id,
-          },
-        ],
-      });
-
-      return Response.json({
-        messages: [
-          {
-            id: assistantMessageId,
-            role: "assistant",
-            content: fallbackResponse,
-          }
-        ]
-      });
-    }
-
-    console.log("💰 Routing to FinGPT backend for ticker:", ticker || "general financial query");
-
+    // ✅ ALWAYS send to FastAPI - let IT handle the question
     const FASTAPI_URL = process.env.FASTAPI_BACKEND_URL || "http://localhost:8000"
     const assistantMessageId = generateUUID()
 
-    console.log("📡 Calling FastAPI:", `${FASTAPI_URL}/v1/chat/completions`)
+    // ✅ Build enhanced system prompt with context
+    const systemPrompt = conversationContext 
+      ? `You are an expert Wall Street analyst known for actionable, specific insights.
 
-    // ✅ Send conversation context to FastAPI
-    const fastAPIBody = ticker ? {
-    ticker: ticker.toUpperCase(),
-    query: userMessageText, // Send the actual question
-    conversation_context: conversationContext, // Send previous messages for context
-    past_weeks: 4,
-    include_financials: true,
-    temperature: 0.3,
-    stream: true,
-  } : {
-    query: userMessageText,
-    conversation_context: conversationContext,
-    temperature: 0.5,
-    stream: true,
-  };
+    Previous conversation:
+    ${conversationContext}
 
-  const fastAPIResponse = await fetch(`${FASTAPI_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(fastAPIBody), 
-  })
+    CRITICAL RULES:
+    - Give DIRECT, SPECIFIC answers - no generic textbook content
+    - Use NATURAL numbering (1, 2, 3...) - NEVER restart numbering mid-response
+    - NO placeholders like "[Recent development with date]" - use REAL examples or skip the section
+    - Keep it CONVERSATIONAL and EXCITING - you're talking to a real person, not writing a textbook
+    - When you don't have specific data, say "Based on general market trends..." instead of making up placeholders
+
+    Current question: ${userMessageText}
+
+    Answer naturally and specifically. Be the analyst they'd want to grab coffee with.`
+      : `You are a sharp Wall Street analyst who gives specific, actionable insights.
+
+    CRITICAL RULES:
+    - DIRECT answers - no lengthy preambles or disclaimers
+    - Use CONSISTENT numbering (1, 2, 3...) throughout your entire response
+    - NO placeholders - if you don't have specific data, speak generally but naturally
+    - Be CONVERSATIONAL and ENGAGING - like you're explaining to a friend over coffee
+    - Focus on WHAT MATTERS - skip the textbook definitions unless specifically asked
+
+    Question: ${userMessageText}
+
+    Give a crisp, insightful answer that gets to the point.`;
+
+    // ✅ Smart request body with improved parameters
+    const fastAPIBody = {
+      message: userMessageText,
+      ticker: ticker || "",
+      conversation_context: conversationContext,
+      system_prompt: systemPrompt, 
+      instructions: "Be specific and conversational. Use consistent numbering (1,2,3). No placeholders or generic advice. Get to the point.", 
+      past_weeks: 4,
+      include_financials: ticker ? true : false,
+      temperature: 0.8,    // For varied responses    
+      max_new_tokens: 512,    
+      stream: true,
+    };
+
+    console.log("📤 Request body:", { 
+      ticker: fastAPIBody.ticker, 
+      temperature: fastAPIBody.temperature,
+      max_tokens: fastAPIBody.max_new_tokens,
+      has_context: !!conversationContext 
+    });
+
+    console.log("📡 Calling FastAPI:", `${FASTAPI_URL}/v1/chat/completions`);
+
+    const fastAPIResponse = await fetch(`${FASTAPI_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fastAPIBody),
+    });
 
     if (!fastAPIResponse.ok) {
-      const errorText = await fastAPIResponse.text()
-      console.error("FastAPI error response:", errorText)
+      const errorText = await fastAPIResponse.text();
+      console.error("FastAPI error response:", errorText);
       
-      // ✅ Better error handling
-      const assistantMessageId = generateUUID();
-      const errorMessage = `I encountered an issue: ${errorText}. Please try asking about a different stock or rephrase your question.`;
+      // ✅ Friendly error handling
+      const errorAssistantId = generateUUID();
+      const errorMessage = `I encountered an issue processing your question. Please try rephrasing or ask about a specific stock ticker.`;
 
       await saveMessages({
         messages: [
           {
-            id: assistantMessageId,
+            id: errorAssistantId,
             role: "assistant",
             parts: [{ text: errorMessage, type: "text" }],
             createdAt: new Date(),
@@ -249,7 +248,7 @@ async function handleChatRequest(requestBody: PostRequestBody) {
       return Response.json({
         messages: [
           {
-            id: assistantMessageId,
+            id: errorAssistantId,
             role: "assistant",
             content: errorMessage,
           }
@@ -257,9 +256,9 @@ async function handleChatRequest(requestBody: PostRequestBody) {
       });
     }
 
+    // ✅ Stream the response
     console.log("✅ FastAPI response received")
 
-    // Collect all the text
     const reader = fastAPIResponse.body!.getReader()
     const decoder = new TextDecoder()
     let fullText = ""
@@ -292,11 +291,7 @@ async function handleChatRequest(requestBody: PostRequestBody) {
 
     console.log("✅ Complete text received, length:", fullText.length)
 
-    console.log("✅ Complete text received, length:", fullText.length)
-    console.log("📝 First 100 chars:", fullText.substring(0, 100))
-    console.log("📝 Last 100 chars:", fullText.substring(fullText.length - 100))
-
-    // Save to database
+    // Save and return
     await saveMessages({
       messages: [
         {
@@ -312,22 +307,15 @@ async function handleChatRequest(requestBody: PostRequestBody) {
 
     console.log("✅ Message saved to database")
 
-    // ✅ Store in a const to ensure it's not modified
-    const responseContent = fullText;
-    const responsePayload = {
+    return Response.json({
       messages: [
         {
           id: assistantMessageId,
           role: "assistant",
-          content: responseContent,
+          content: fullText,
         }
       ]
-    };
-
-    console.log("📤 Sending response with length:", responseContent.length);
-    console.log("📤 Response payload:", JSON.stringify(responsePayload).substring(0, 200));
-
-    return Response.json(responsePayload)
+    })
 
   } catch (error) {
     console.error("Unhandled error in chat API:", error)

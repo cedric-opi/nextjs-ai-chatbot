@@ -52,6 +52,7 @@ export function Chat({
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(true);
+  const [isLoadingResponse, setIsLoadingResponse] = useState(false);
 
   const popularTickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA"];
   const suggestedQuestions = [
@@ -133,6 +134,7 @@ export function Chat({
       };
       
       setMessages((prev) => [...prev, userMessage]);
+      setIsLoadingResponse(true); // ✅ ADD THIS
 
       // Make the API call
       const response = await fetch("/api/chat", {
@@ -150,6 +152,7 @@ export function Chat({
       console.log('📡 Response received:', response.status);
 
       if (!response.ok) {
+        setIsLoadingResponse(false); // ✅ ADD THIS
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -168,9 +171,11 @@ export function Chat({
         console.log('✅ Assistant message added to UI');
       }
 
+      setIsLoadingResponse(false); // ✅ ADD THIS
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     } catch (error) {
       console.error('❌ Error sending message:', error);
+      setIsLoadingResponse(false); // ✅ ADD THIS
       toast({
         type: "error",
         description: "Failed to send message",
@@ -331,7 +336,7 @@ export function Chat({
         regenerate={regenerate}
         selectedModelId={initialChatModel}
         setMessages={setMessages}
-        status={status}
+        status={isLoadingResponse ? "submitted" : status}
         votes={votes}
       />
 
