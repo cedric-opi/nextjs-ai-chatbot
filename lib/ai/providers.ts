@@ -7,11 +7,12 @@ const gatewayOpenAI = createOpenAI({
 
 export const myProvider = {
   languageModel(name: string) {
-    const map: Record<string, ReturnType<typeof gatewayOpenAI>> = {
+    const map = {
       "title-model": gatewayOpenAI("gpt-4o-mini"),
       "chat-model": gatewayOpenAI("gpt-4o"),
+      "chat-model-reasoning": gatewayOpenAI("o1-preview"),
     };
-    return map[name] ?? gatewayOpenAI(name as any);
+    
+    return map[name as keyof typeof map] ?? gatewayOpenAI(name as any);
   },
 };
-

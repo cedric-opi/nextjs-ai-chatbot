@@ -3,12 +3,13 @@
 import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import type { VisibilityType } from "@/components/visibility-selector";
-import { myProvider } from "@/lib/ai/providers";
+import { openai } from '@ai-sdk/openai';
 import {
   deleteMessagesByChatIdAfterTimestamp,
   getMessageById,
   updateChatVisiblityById,
 } from "@/lib/db/queries";
+import { ChatMessage } from "@/lib/types";
 
 export async function saveChatModelAsCookie(model: string) {
   const cookieStore = await cookies();
@@ -18,12 +19,12 @@ export async function saveChatModelAsCookie(model: string) {
 export async function generateTitleFromUserMessage({
   message,
 }: {
-  message: UIMessage;
+  message: ChatMessage;
 }) {
   try {
     const { text: title } = await generateText({
-      model: myProvider.languageModel("title-model"),
-      system: `\n
+      model: openai('gpt-4o-mini'), // Use direct model instead of provider wrapper
+      system: `
       - you will generate a short title based on the first message a user begins a conversation with
       - ensure it is not more than 80 characters long
       - the title should be a summary of the user's message
@@ -33,18 +34,8 @@ export async function generateTitleFromUserMessage({
 
     return title;
   } catch (error) {
-    // FALLBACK: If AI SDK fails, generate simple title from message
-    console.warn("Title generation failed, using fallback:", error);
-    
-    const content = typeof message.content === 'string' 
-      ? message.content 
-      : message.parts?.[0]?.text || "New Chat";
-    
-    // Create simple title from first 50 chars
-    const fallbackTitle = content.substring(0, 50).trim() + 
-      (content.length > 50 ? "..." : "");
-    
-    return fallbackTitle || "Financial Analysis";
+    console.error(error);
+    return "New Chat";
   }
 }
 
