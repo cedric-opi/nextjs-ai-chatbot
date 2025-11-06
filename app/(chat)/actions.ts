@@ -22,7 +22,7 @@ export async function generateTitleFromUserMessage({
 }) {
   try {
     const { text: title } = await generateText({
-      model: myProvider.languageModel("title-model"),
+      model: "openai/gpt-5",
       system: `\n
       - you will generate a short title based on the first message a user begins a conversation with
       - ensure it is not more than 80 characters long
