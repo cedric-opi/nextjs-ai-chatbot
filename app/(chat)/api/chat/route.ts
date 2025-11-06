@@ -203,7 +203,7 @@ async function handleChatRequest(requestBody: PostRequestBody) {
       past_weeks: 4,
       include_financials: ticker ? true : false,
       temperature: 0.8,    // For varied responses    
-      max_new_tokens: 512,    
+      max_new_tokens: 1024,    
       stream: true,
     };
 
