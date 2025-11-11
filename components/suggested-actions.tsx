@@ -16,7 +16,7 @@ type SuggestedActionsProps = {
 
 function PureSuggestedActions({ chatId, sendMessage, messages }: SuggestedActionsProps) {
   const suggestedActions = [
-    "How should I start investing with a small budget?",
+    "What is the best investment strategy for 2025?",
     "What are the safest assets during economic downturns?",
     "How do I build a diversified investment portfolio?",
     "What's the difference between ETFs and mutual funds?",

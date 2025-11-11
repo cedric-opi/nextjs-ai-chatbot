@@ -1,21 +1,17 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
 import { useArtifactSelector } from "@/hooks/use-artifact";
-import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
 import type { Vote } from "@/lib/db/schema";
-import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, generateUUID } from "@/lib/utils";
 import { Artifact } from "./artifact";
-import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
@@ -45,14 +41,19 @@ export function Chat({
   });
 
   const { mutate } = useSWRConfig();
-  const { setDataStream } = useDataStream();
-
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const messagesRef = useRef<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState<string>("");
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
-  const currentModelIdRef = useRef(currentModelId);
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(true);
-  const [isLoadingResponse, setIsLoadingResponse] = useState(false);
+  const [status, setStatus] = useState<"ready" | "submitted" | "in_progress">("ready"); // ✅ Changed from "idle"
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const isProcessingRef = useRef(false); // ✅ Prevent double calls
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const popularTickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA"];
   const suggestedQuestions = [
@@ -63,184 +64,99 @@ export function Chat({
   ];
 
   useEffect(() => {
-    currentModelIdRef.current = currentModelId;
-  }, [currentModelId]);
-
-  const {
-    messages,
-    setMessages,
-    sendMessage: originalSendMessage,
-    status,
-    stop,
-    regenerate,
-    resumeStream,
-  } = useChat<ChatMessage>({
-    id,
-    api: "/api/chat",
-    messages: initialMessages,
-    experimental_throttle: 100,
-    generateId: generateUUID,
-    body: {
-      selectedChatModel: currentModelIdRef.current,
-      selectedVisibilityType: visibilityType,
-    },
-    onData: (dataPart) => {
-      console.log('🔥 onData received:', dataPart);
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
-      if (dataPart.type === "data-usage") {
-        setUsage(dataPart.data);
-      }
-    },
-    onResponse: async (response) => {
-      console.log('🔥 onResponse status:', response.status);
-      console.log('🔥 onResponse headers:', Object.fromEntries(response.headers.entries()));
-      
-      const clonedResponse = response.clone();
-      const text = await clonedResponse.text();
-      console.log('🔥 onResponse body:', text);
-    },
-    onFinish: (message) => {
-      console.log('🔥 onFinish message:', message);
-      mutate(unstable_serialize(getChatHistoryPaginationKey));
-    },
-    onError: (error) => {
-      console.error('🔥 onError:', error);
-      if (error instanceof ChatSDKError) {
-        toast({
-          type: "error",
-          description: error.message,
-        });
-      } else {
-        console.error("Chat error:", error);
-        toast({
-          type: "error",
-          description: "An error occurred",
-        });
-      }
-    },
-  });
-
-  // ✅ Custom send message function wrapped in useCallback
-  const customSendMessage = useCallback(async (message: { role: "user"; parts: Array<{ type: string; text: string }> }) => {
-    try {
-      console.log('🚀 Sending message:', message);
-      
-      // Add user message to UI immediately
-      const userMessage: ChatMessage = {
-        id: generateUUID(),
-        role: "user",
-        content: message.parts[0].text,
-        parts: message.parts,
-      };
-      
-      setMessages((prev) => [...prev, userMessage]);
-      setIsLoadingResponse(true); // ✅ ADD THIS
-
-      // Make the API call
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id,
-          messages: [...messages, userMessage],
-          selectedVisibilityType: visibilityType,
-        }),
-      });
-
-      console.log('📡 Response received:', response.status);
-
-      if (!response.ok) {
-        setIsLoadingResponse(false); // ✅ ADD THIS
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('📦 Response data:', data);
-
-      // ✅ Add assistant message to UI
-      if (data.messages && data.messages.length > 0) {
-        const assistantMessage = data.messages[0];
-        setMessages((prev) => [...prev, {
-          id: assistantMessage.id,
-          role: assistantMessage.role,
-          content: assistantMessage.content,
-          parts: [{ type: "text", text: assistantMessage.content }],
-        }]);
-        console.log('✅ Assistant message added to UI');
-      }
-
-      setIsLoadingResponse(false); // ✅ ADD THIS
-      mutate(unstable_serialize(getChatHistoryPaginationKey));
-    } catch (error) {
-      console.error('❌ Error sending message:', error);
-      setIsLoadingResponse(false); // ✅ ADD THIS
-      toast({
-        type: "error",
-        description: "Failed to send message",
-      });
-    }
-  }, [id, messages, visibilityType, setMessages, mutate]);
-
-  // ✅ Log messages changes
-  useEffect(() => {
-    console.log('🔥 MESSAGES STATE:', {
-      count: messages.length,
-      status,
-      messages: messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content?.substring(0, 50) + '...'
-      }))
-    });
-  }, [messages, status]);
-
-  const searchParams = useSearchParams();
-  const query = searchParams.get("query");
-  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
-
-  // ✅ Updated to use customSendMessage
-  useEffect(() => {
-    if (query && !hasAppendedQuery) {
-      customSendMessage({
-        role: "user" as const,
-        parts: [{ type: "text", text: query }],
-      });
-      setHasAppendedQuery(true);
-      window.history.replaceState({}, "", `/chat/${id}`);
-    }
-  }, [query, hasAppendedQuery, id, customSendMessage]);
-
-  useEffect(() => {
     if (messages.length > 0) {
       setShowWelcomeBanner(false);
     }
   }, [messages.length]);
 
-  // ✅ Updated to use customSendMessage
+  // ✅ Completely rewritten send message function
+  const sendMessage = useCallback(async (message: { role: "user"; parts: any[] }) => {
+    if (isProcessingRef.current) {
+      console.log("⏸️ Already processing, skipping");
+      return;
+    }
+
+    setInput("");
+    setAttachments([]);
+    
+    isProcessingRef.current = true;
+    console.log("🚀 Sending message with parts:", message.parts);
+    
+    const userMessageId = generateUUID();
+    const userMessage: ChatMessage = {
+      id: userMessageId,
+      role: "user",
+      parts: message.parts,
+    };
+
+    const updatedMessages = [...messagesRef.current, userMessage];
+    setMessages(updatedMessages);
+    setStatus("submitted"); 
+
+    console.log("📤 Status set to submitted");
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          messages: updatedMessages,
+          selectedVisibilityType: visibilityType,
+          selectedChatModel: currentModelId,
+        }),
+      });
+
+      console.log("📡 Response status:", response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API Error:", errorText);
+        throw new Error("Failed to send message");
+      }
+
+      const data = await response.json();
+      console.log("✅ Response data:", data);
+
+      if (data.id && data.role === "assistant") {
+        const assistantMessage: ChatMessage = {
+          id: data.id,
+          role: "assistant",
+          parts: data.parts || [{ type: "text", text: data.content || "" }],
+        };
+        
+        console.log("✅ Adding assistant message");
+        setMessages(prev => [...prev, assistantMessage]);
+      }
+
+      mutate(unstable_serialize(getChatHistoryPaginationKey));
+      
+    } catch (error) {
+      console.error("❌ Send error:", error);
+      toast({ type: "error", description: "Failed to send message" });
+    } finally {
+      console.log("✅ Resetting status to ready");
+      isProcessingRef.current = false;
+      setStatus("ready"); 
+    }
+  }, [id, visibilityType, currentModelId, mutate]);
+
   const quickSend = useCallback((text: string) => {
     setShowWelcomeBanner(false);
-    customSendMessage({
-      role: "user" as const,
+    sendMessage({
+      role: "user",
       parts: [{ type: "text", text }],
     });
-  }, [customSendMessage]);
+  }, [sendMessage]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
     fetcher
   );
 
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
 
-  useAutoResume({
-    autoResume,
-    initialMessages,
-    resumeStream,
-    setMessages,
-  });
+  console.log("🔍 Current status:", status);
 
   return (
     <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
@@ -250,7 +166,6 @@ export function Chat({
         selectedVisibilityType={initialVisibilityType}
       />
 
-      {/* Welcome Banner */}
       {showWelcomeBanner && messages.length === 0 && !isReadonly && (
         <div className="mx-auto w-full max-w-4xl px-2 md:px-4 py-6">
           <div className="rounded-2xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-8 shadow-xl">
@@ -306,14 +221,13 @@ export function Chat({
                 className="text-sm font-medium text-gray-500 hover:text-gray-700"
               >
                 Start chatting →
-              </button> 
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Streaming indicator */}
-      {status === "in_progress" && messages.length > 0 && (
+      {status === "in_progress" && (
         <div className="mx-auto w-full max-w-4xl px-2 md:px-4 mb-3">
           <div className="flex items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
             <div className="flex gap-1">
@@ -333,10 +247,10 @@ export function Chat({
         isArtifactVisible={isArtifactVisible}
         isReadonly={isReadonly}
         messages={messages}
-        regenerate={regenerate}
+        regenerate={() => {}}
         selectedModelId={initialChatModel}
         setMessages={setMessages}
-        status={isLoadingResponse ? "submitted" : status}
+        status={status}
         votes={votes}
       />
 
@@ -350,12 +264,12 @@ export function Chat({
             onModelChange={setCurrentModelId}
             selectedModelId={currentModelId}
             selectedVisibilityType={visibilityType}
-            sendMessage={customSendMessage}
+            sendMessage={sendMessage}
             setAttachments={setAttachments}
             setInput={setInput}
             setMessages={setMessages}
             status={status}
-            stop={stop}
+            stop={() => {}}
             usage={usage}
           />
         )}
@@ -367,15 +281,15 @@ export function Chat({
         input={input}
         isReadonly={isReadonly}
         messages={messages}
-        regenerate={regenerate}
+        regenerate={() => {}}
         selectedModelId={currentModelId}
         selectedVisibilityType={visibilityType}
-        sendMessage={customSendMessage}
+        sendMessage={sendMessage}
         setAttachments={setAttachments}
         setInput={setInput}
         setMessages={setMessages}
         status={status}
-        stop={stop}
+        stop={() => {}}
         votes={votes}
       />
     </div>

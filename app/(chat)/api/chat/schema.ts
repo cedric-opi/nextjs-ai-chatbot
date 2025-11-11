@@ -15,6 +15,9 @@ const filePartSchema = z.object({
 const PartSchema = z.object({
   type: z.string(),
   text: z.string().optional(),
+  url: z.string().optional(),     
+  name: z.string().optional(),     
+  mediaType: z.string().optional(), 
 })
 
 const MessageSchema = z.object({

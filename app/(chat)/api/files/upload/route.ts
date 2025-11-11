@@ -2,8 +2,6 @@ import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { auth } from "@/app/(auth)/auth";
-
 // Use Blob instead of File since File is not available in Node.js environment
 const FileSchema = z.object({
   file: z
@@ -17,51 +15,53 @@ const FileSchema = z.object({
     }),
 });
 
-export async function POST(request: Request) {
-  const session = await auth();
-
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (request.body === null) {
-    return new Response("Request body is empty", { status: 400 });
-  }
-
+export async function POST(req: Request) {
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as Blob;
+    // Get the file from FormData (NOT JSON!)
+    const formData = await req.formData();
+    const file = formData.get("file") as File;
 
     if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No file provided" },
+        { status: 400 }
+      );
     }
 
-    const validatedFile = FileSchema.safeParse({ file });
-
-    if (!validatedFile.success) {
-      const errorMessage = validatedFile.error.errors
-        .map((error) => error.message)
-        .join(", ");
-
-      return NextResponse.json({ error: errorMessage }, { status: 400 });
+    // Validate file type
+    const validTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      return NextResponse.json(
+        { error: "Invalid file type. Only PNG, JPG, JPEG, and WEBP are allowed." },
+        { status: 400 }
+      );
     }
 
-    // Get filename from formData since Blob doesn't have name property
-    const filename = (formData.get("file") as File).name;
-    const fileBuffer = await file.arrayBuffer();
-
-    try {
-      const data = await put(`${filename}`, fileBuffer, {
-        access: "public",
-      });
-
-      return NextResponse.json(data);
-    } catch (_error) {
-      return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    // Validate file size (e.g., 10MB max)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: "File too large. Maximum size is 10MB." },
+        { status: 400 }
+      );
     }
-  } catch (_error) {
+
+    // Upload to Vercel Blob Storage
+    const blob = await put(file.name, file, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+
+    return NextResponse.json({
+      url: blob.url,
+      pathname: blob.pathname,
+      contentType: file.type,
+      size: file.size,
+    });
+  } catch (error) {
+    console.error("File upload error:", error);
     return NextResponse.json(
-      { error: "Failed to process request" },
+      { error: "Failed to upload file" },
       { status: 500 }
     );
   }

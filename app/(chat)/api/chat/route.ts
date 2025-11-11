@@ -56,6 +56,25 @@ async function handleChatRequest(requestBody: PostRequestBody) {
       parts: userMessage.parts || [{ type: "text", text: userMessage.content || "" }],
     }
 
+    // ✅ Handle both content (from useChat) and parts (from database) formats
+    const userMessageText = userMessage.content || 
+      userMessage.parts?.filter(p => p.type === "text").map(p => p.text).join("\n") || 
+      "";
+
+    const imageAttachments = userMessage.parts
+      ?.filter(part => part.type === "file" && part.mediaType?.startsWith("image/"))
+      ?.map(part => ({ url: part.url, name: part.name })) || [];
+
+    console.log("📝 Message text:", userMessageText);
+    console.log("🖼️  Image attachments:", imageAttachments.length);
+    console.log("🔍 Image details:", imageAttachments);
+
+    // ✅ Convert to parts format for database
+    const messageParts = [
+      { type: "text" as const, text: userMessageText },
+      ...(userMessage.parts?.filter(p => p.type === "file") || [])
+    ];
+
     const session = await auth()
 
     if (!session?.user) {
@@ -81,7 +100,6 @@ async function handleChatRequest(requestBody: PostRequestBody) {
         return new ChatSDKError("forbidden:chat").toResponse()
       }
     } else {
-      const userMessageText = message.parts?.[0]?.text || ""
 
       const title =
         userMessageText.substring(0, 50).trim() + (userMessageText.length > 50 ? "..." : "") || "Financial Chat"
@@ -107,8 +125,6 @@ async function handleChatRequest(requestBody: PostRequestBody) {
         },
       ],
     })
-
-    const userMessageText = message.parts?.[0]?.text || ""
 
     // ✅ Simple ticker extraction (just for hints, not requirements)
     const extractTickerFromMessage = (text: string): string | null => {
@@ -205,13 +221,15 @@ async function handleChatRequest(requestBody: PostRequestBody) {
       temperature: 0.8,    // For varied responses    
       max_new_tokens: 1024,    
       stream: true,
+      ...(imageAttachments.length > 0 && { image_urls: imageAttachments.map(img => img.url) }),
     };
 
     console.log("📤 Request body:", { 
       ticker: fastAPIBody.ticker, 
       temperature: fastAPIBody.temperature,
       max_tokens: fastAPIBody.max_new_tokens,
-      has_context: !!conversationContext 
+      has_context: !!conversationContext, 
+      has_images: imageAttachments.length > 0
     });
 
     console.log("📡 Calling FastAPI:", `${FASTAPI_URL}/v1/chat/completions`);
@@ -257,71 +275,57 @@ async function handleChatRequest(requestBody: PostRequestBody) {
     }
 
     // ✅ Stream the response
-    console.log("✅ FastAPI response received")
+    console.log("✅ FastAPI response received, collecting...");
 
-    const reader = fastAPIResponse.body!.getReader()
-    const decoder = new TextDecoder()
-    let fullText = ""
+    const reader = fastAPIResponse.body!.getReader();
+    const decoder = new TextDecoder();
+    let fullText = "";
 
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      const text = decoder.decode(value, { stream: true })
-      const lines = text.split("\n")
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n");
 
       for (const line of lines) {
-        if (!line.trim() || !line.startsWith("data: ")) continue
-
-        const data = line.slice(6).trim()
-        if (data === "[DONE]") continue
+        if (!line.trim() || !line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
 
         try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-
-          if (content) {
-            fullText += content
-          }
-        } catch (e) {
-          // Skip invalid JSON
-        }
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) fullText += content;
+        } catch (e) {}
       }
     }
 
-    console.log("✅ Complete text received, length:", fullText.length)
+    console.log("✅ Complete, length:", fullText.length);
 
-    // Save and return
     await saveMessages({
-      messages: [
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          parts: [{ text: fullText, type: "text" }],
-          createdAt: new Date(),
-          attachments: [],
-          chatId: id,
-        },
-      ],
-    })
-
-    console.log("✅ Message saved to database")
+      messages: [{
+        id: assistantMessageId,
+        role: "assistant",
+        parts: [{ text: fullText, type: "text" }],
+        createdAt: new Date(),
+        attachments: [],
+        chatId: id,
+      }],
+    });
 
     return Response.json({
-      messages: [
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: fullText,
-        }
-      ]
-    })
+      id: assistantMessageId,
+      role: "assistant",
+      parts: [{ type: "text", text: fullText }],
+      content: fullText,
+    });
 
-  } catch (error) {
-    console.error("Unhandled error in chat API:", error)
-    return new ChatSDKError("offline:chat").toResponse()
-  }
-}
+      } catch (error) {
+        console.error("Unhandled error in chat API:", error)
+        return new ChatSDKError("offline:chat").toResponse()
+      }
+    }
 
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url)

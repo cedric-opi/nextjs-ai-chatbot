@@ -128,24 +128,36 @@ function PureMultimodalInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
-
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
   const submitForm = useCallback(() => {
+    if (isSubmitting) {
+      console.log("⏸️ Already submitting, skipping");
+      return;
+    }
+    
+    setIsSubmitting(true);
+
     window.history.replaceState({}, "", `/chat/${chatId}`);
+
+    const messageParts = [
+      ...attachments.map((attachment) => ({
+        type: "file" as const,
+        url: attachment.url,
+        name: attachment.name,
+        mediaType: attachment.contentType,
+      })),
+      {
+        type: "text",
+        text: input,
+      },
+    ];
+
+    console.log("📤 Sending message parts:", JSON.stringify(messageParts, null, 2));
 
     sendMessage({
       role: "user",
-      parts: [
-        ...attachments.map((attachment) => ({
-          type: "file" as const,
-          url: attachment.url,
-          name: attachment.name,
-          mediaType: attachment.contentType,
-        })),
-        {
-          type: "text",
-          text: input,
-        },
-      ],
+      parts: messageParts,
     });
 
     setAttachments([]);
@@ -153,11 +165,18 @@ function PureMultimodalInput({
     resetHeight();
     setInput("");
 
+    // ✅ Reset isSubmitting after a short delay
+    setTimeout(() => {
+      setIsSubmitting(false);
+      console.log("✅ isSubmitting reset to false");
+    }, 500);
+
     if (width && width > 768) {
       textareaRef.current?.focus();
     }
   }, [
     input,
+    isSubmitting,
     setInput,
     attachments,
     sendMessage,
@@ -193,7 +212,39 @@ function PureMultimodalInput({
     } catch (_error) {
       toast.error("Failed to upload file, please try again!");
     }
-  }, []);
+  }, []); 
+
+  const analyzeImage = useCallback(async (imageUrl: string, imageName: string) => {
+    try {
+      toast.info("Analyzing image...", { duration: 2000 });
+      
+      const response = await fetch("/api/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl,
+          prompt: "Analyze this financial chart, document, or image. Extract key insights, data points, trends, and provide actionable information.",
+        }),
+      });
+
+      if (response.ok) {
+        const { analysis } = await response.json();
+        
+        // Add analysis to input
+        setInput((prev) => {
+          const prefix = prev ? prev + "\n\n" : "";
+          return prefix + `📊 Analysis of ${imageName}:\n${analysis}`;
+        });
+        
+        toast.success("Image analyzed! Check the input above.", { duration: 3000 });
+      } else {
+        toast.error("Failed to analyze image");
+      }
+    } catch (error) {
+      console.error("Analysis error:", error);
+      toast.error("Failed to analyze image");
+    }
+  }, [setInput]);  
 
   const _modelResolver = useMemo(() => {
     return myProvider.languageModel(selectedModelId);
@@ -233,47 +284,48 @@ function PureMultimodalInput({
   );
 
   return (
-    <div className={cn("relative flex w-full flex-col gap-4", className)}>
-      {messages.length === 0 &&
-        attachments.length === 0 &&
-        uploadQueue.length === 0 && (
-          <SuggestedActions
-            chatId={chatId}
-            sendMessage={sendMessage}
-            selectedVisibilityType={selectedVisibilityType}
-            messages={messages as unknown as ChatMessage[]}
-          />
-        )}
+  <div className={cn("relative flex w-full flex-col gap-4", className)}>
+    {messages.length === 0 &&
+      attachments.length === 0 &&
+      uploadQueue.length === 0 && (
+        <SuggestedActions
+          chatId={chatId}
+          sendMessage={sendMessage}
+          selectedVisibilityType={selectedVisibilityType}
+          messages={messages as unknown as ChatMessage[]}
+        />
+      )}
 
-      <input
-        className="-top-4 -left-4 pointer-events-none fixed size-0.5 opacity-0"
-        multiple
-        onChange={handleFileChange}
-        ref={fileInputRef}
-        tabIndex={-1}
-        type="file"
-      />
+    <input
+      className="-top-4 -left-4 pointer-events-none fixed size-0.5 opacity-0"
+      multiple
+      onChange={handleFileChange}
+      ref={fileInputRef}
+      tabIndex={-1}
+      type="file"
+    />
 
-      <PromptInput
-        className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (status !== "ready") {
-            toast.error("Please wait for the model to finish its response!");
-          } else {
-            submitForm();
-          }
-        }}
-      >
-        {(attachments.length > 0 || uploadQueue.length > 0) && (
-          <div
-            className="flex flex-row items-end gap-2 overflow-x-scroll"
-            data-testid="attachments-preview"
-          >
-            {attachments.map((attachment) => (
+    <PromptInput
+      className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (status !== "ready") {
+          toast.error("Please wait for the model to finish its response!");
+        } else {
+          submitForm();
+        }
+      }}
+    >
+      {(attachments.length > 0 || uploadQueue.length > 0) && (
+        <div
+          className="flex flex-row items-end gap-2 overflow-x-scroll"
+          data-testid="attachments-preview"
+        >
+          {/* FIXED: Wrap each attachment in a div with group class */}
+          {attachments.map((attachment) => (
+            <div key={attachment.url} className="relative group">
               <PreviewAttachment
                 attachment={attachment}
-                key={attachment.url}
                 onRemove={() => {
                   setAttachments((currentAttachments) =>
                     currentAttachments.filter((a) => a.url !== attachment.url)
@@ -283,66 +335,95 @@ function PureMultimodalInput({
                   }
                 }}
               />
-            ))}
 
-            {uploadQueue.map((filename) => (
-              <PreviewAttachment
-                attachment={{
-                  url: "",
-                  name: filename,
-                  contentType: "",
-                }}
-                isUploading={true}
-                key={filename}
-              />
-            ))}
-          </div>
-        )}
-        <div className="flex flex-row items-start gap-1 sm:gap-2">
-          <PromptInputTextarea
-            autoFocus
-            className="grow resize-none border-0! border-none! bg-transparent p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
-            data-testid="multimodal-input"
-            disableAutoResize={true}
-            maxHeight={200}
-            minHeight={44}
-            onChange={handleInput}
-            placeholder="Send a message..."
-            ref={textareaRef}
-            rows={1}
-            value={input}
-          />{" "}
-          <Context {...contextProps} />
+              {/* Analyze button - only for images */}
+              {attachment.contentType?.startsWith("image/") && (
+                <button
+                  onClick={() => analyzeImage(attachment.url, attachment.name)}
+                  className="absolute -top-2 -right-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1.5 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center"
+                  title="Analyze this image"
+                  type="button"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                    <path
+                      fillRule="evenodd"
+                      d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+
+          {/* Upload queue items */}
+          {uploadQueue.map((filename) => (
+            <PreviewAttachment
+              attachment={{
+                url: "",
+                name: filename,
+                contentType: "",
+              }}
+              isUploading={true}
+              key={filename}
+            />
+          ))}
         </div>
-        <PromptInputToolbar className="!border-top-0 border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
-          <PromptInputTools className="gap-0 sm:gap-0.5">
-            <AttachmentsButton
-              fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
-              status={status}
-            />
-            <ModelSelectorCompact
-              onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
-            />
-          </PromptInputTools>
+      )}
 
-          {status === "submitted" ? (
-            <StopButton setMessages={setMessages} stop={stop} />
-          ) : (
-            <PromptInputSubmit
-              className="size-8 rounded-full bg-primary text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground"
-              disabled={!input.trim() || uploadQueue.length > 0}
-              status={status}
-            >
-              <ArrowUpIcon size={14} />
-            </PromptInputSubmit>
-          )}
-        </PromptInputToolbar>
-      </PromptInput>
-    </div>
-  );
+      <div className="flex flex-row items-start gap-1 sm:gap-2">
+        <PromptInputTextarea
+          autoFocus
+          className="grow resize-none border-0! border-none! bg-transparent p-2 text-sm outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+          data-testid="multimodal-input"
+          disableAutoResize={true}
+          maxHeight={200}
+          minHeight={44}
+          onChange={handleInput}
+          placeholder="Send a message..."
+          ref={textareaRef}
+          rows={1}
+          value={input}
+        />{" "}
+        <Context {...contextProps} />
+      </div>
+
+      <PromptInputToolbar className="!border-top-0 border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
+        <PromptInputTools className="gap-0 sm:gap-0.5">
+          <AttachmentsButton
+            fileInputRef={fileInputRef}
+            selectedModelId={selectedModelId}
+            status={status}
+          />
+          <ModelSelectorCompact
+            onModelChange={onModelChange}
+            selectedModelId={selectedModelId}
+          />
+        </PromptInputTools>
+
+        {status === "submitted" ? (
+          <StopButton setMessages={setMessages} stop={stop} />
+        ) : (
+          <PromptInputSubmit
+            className="size-8 rounded-full bg-primary text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground"
+            disabled={!input.trim() || uploadQueue.length > 0}
+            status={status}
+          >
+            <ArrowUpIcon size={14} />
+          </PromptInputSubmit>
+        )}
+      </PromptInputToolbar>
+    </PromptInput>
+  </div>
+);
 }
+
 
 export const MultimodalInput = memo(
   PureMultimodalInput,
