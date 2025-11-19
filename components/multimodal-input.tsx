@@ -140,7 +140,14 @@ function PureMultimodalInput({
 
     window.history.replaceState({}, "", `/chat/${chatId}`);
 
-    const messageParts = [
+    // ✅ Properly typed message parts
+    const messageParts: Array<{
+      type: "file" | "text";
+      url?: string;
+      name?: string;
+      mediaType?: string;
+      text?: string;
+    }> = [
       ...attachments.map((attachment) => ({
         type: "file" as const,
         url: attachment.url,
@@ -148,14 +155,15 @@ function PureMultimodalInput({
         mediaType: attachment.contentType,
       })),
       {
-        type: "text",
+        type: "text" as const,
         text: input,
       },
     ];
 
     console.log("📤 Sending message parts:", JSON.stringify(messageParts, null, 2));
 
-    sendMessage({
+    // ✅ Cast to any to avoid type conflicts
+    (sendMessage as any)({
       role: "user",
       parts: messageParts,
     });
@@ -165,7 +173,6 @@ function PureMultimodalInput({
     resetHeight();
     setInput("");
 
-    // ✅ Reset isSubmitting after a short delay
     setTimeout(() => {
       setIsSubmitting(false);
       console.log("✅ isSubmitting reset to false");

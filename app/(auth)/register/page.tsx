@@ -37,10 +37,10 @@ export default function Page() {
 
       setIsSuccessful(true)
       updateSession()
-      router.refresh()
+      router.push("/")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, router.refresh, updateSession])
+  }, [state.status])
 
   const handleSubmit = (formData: FormData) => {
     setEmail(formData.get("email") as string)
@@ -57,7 +57,9 @@ export default function Page() {
       <div className="relative z-10 flex w-full max-w-md flex-col gap-8 overflow-hidden rounded-2xl bg-card shadow-xl border border-border">
         <div className="bg-gradient-to-r from-primary to-primary/80 px-6 py-8 text-center">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <StonkAILogo/>
+            <div className="flex items-center justify-center gap-2 mb-2">
+                        <StonkAILogo/>
+            </div>
           </div>
           <p className="text-primary-foreground/80 text-sm font-medium">AI-Powered Financial Intelligence</p>
         </div>

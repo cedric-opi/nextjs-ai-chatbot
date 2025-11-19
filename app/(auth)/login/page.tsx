@@ -10,6 +10,7 @@ import { SubmitButton } from "@/components/submit-button"
 import { toast } from "@/components/toast"
 import { type LoginActionState, login } from "../actions"
 import { StonkAILogo } from "@/components/elements/stonk-ai-logo"
+
 export default function Page() {
   const router = useRouter()
 
@@ -36,10 +37,10 @@ export default function Page() {
     } else if (state.status === "success") {
       setIsSuccessful(true)
       updateSession()
-      router.refresh()
+      router.push("/")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, router.refresh, updateSession])
+  }, [state.status])
 
   const handleSubmit = (formData: FormData) => {
     setEmail(formData.get("email") as string)
