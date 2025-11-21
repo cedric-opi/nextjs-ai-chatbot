@@ -174,5 +174,3 @@ vercel
 ```
 
 ---
-
-If you'd like, I can refine this README with badges, architecture diagrams, or project folder structure.
