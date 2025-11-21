@@ -1,8 +1,10 @@
 "use client"
 
-import { Collapsible as CollapsiblePrimitive } from "@radix-ui/react-collapsible"
+import * as React from "react"
+import * as CollapsiblePrimitive from "@radix-ui/react-collapsible"
 
-const Collapsible = CollapsiblePrimitive.Root
+// ✅ Use the component directly, not .Root
+const Collapsible = CollapsiblePrimitive.Collapsible
 
 const CollapsibleTrigger = CollapsiblePrimitive.CollapsibleTrigger
 
